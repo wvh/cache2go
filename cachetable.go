@@ -28,6 +28,9 @@ type CacheTable struct {
 	// Current timer duration.
 	cleanupInterval time.Duration
 
+	// defaultMaxAge is the maximum allowed age for an item.
+	defaultMaxAge time.Duration
+
 	// The logger used for this table.
 	logger *log.Logger
 
@@ -88,6 +91,13 @@ func (table *CacheTable) SetLogger(logger *log.Logger) {
 	table.logger = logger
 }
 
+// SetMaxAge sets the default max age for an item.
+func (table *CacheTable) SetMaxAge(max time.Duration) {
+	table.Lock()
+	defer table.Unlock()
+	table.defaultMaxAge = max
+}
+
 // Expiration check loop, triggered by a self-adjusting timer.
 func (table *CacheTable) expirationCheck() {
 	table.Lock()
@@ -109,6 +119,7 @@ func (table *CacheTable) expirationCheck() {
 		item.RLock()
 		lifeSpan := item.lifeSpan
 		accessedOn := item.accessedOn
+		expiresAt := item.expiresAt
 		item.RUnlock()
 
 		if lifeSpan == 0 {
@@ -116,6 +127,9 @@ func (table *CacheTable) expirationCheck() {
 		}
 		if now.Sub(accessedOn) >= lifeSpan {
 			// Item has excessed its lifespan.
+			table.deleteInternal(key)
+		} else if !expiresAt.IsZero() && now.After(expiresAt) {
+			// item has exceeded its maximum age
 			table.deleteInternal(key)
 		} else {
 			// Find the item chronologically closest to its end-of-lifespan.
@@ -163,7 +177,23 @@ func (table *CacheTable) addInternal(item *CacheItem) {
 // will get removed from the cache.
 // Parameter data is the item's value.
 func (table *CacheTable) Add(key interface{}, lifeSpan time.Duration, data interface{}) *CacheItem {
-	item := NewCacheItem(key, lifeSpan, data)
+	var item *CacheItem
+	if table.defaultMaxAge == 0 {
+		item = NewCacheItem(key, lifeSpan, data)
+	} else {
+		item = NewCacheItemWithMaxAge(key, lifeSpan, table.defaultMaxAge, data)
+	}
+
+	// Add item to cache.
+	table.Lock()
+	table.addInternal(item)
+
+	return item
+}
+
+// AddWithMaxAge adds a key/value pair to the cache with a maximum allowed age.
+func (table *CacheTable) AddWithMaxAge(key interface{}, lifeSpan time.Duration, maxAge time.Duration, data interface{}) *CacheItem {
+	item := NewCacheItemWithMaxAge(key, lifeSpan, maxAge, data)
 
 	// Add item to cache.
 	table.Lock()

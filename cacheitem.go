@@ -23,6 +23,8 @@ type CacheItem struct {
 	data interface{}
 	// How long will the item live in the cache when not being accessed/kept alive.
 	lifeSpan time.Duration
+	// The item's maximum allowed expiration time.
+	expiresAt time.Time
 
 	// Creation timestamp.
 	createdOn time.Time
@@ -53,6 +55,20 @@ func NewCacheItem(key interface{}, lifeSpan time.Duration, data interface{}) *Ca
 	}
 }
 
+func NewCacheItemWithMaxAge(key interface{}, lifeSpan time.Duration, maxAge time.Duration, data interface{}) *CacheItem {
+	t := time.Now()
+	return &CacheItem{
+		key:           key,
+		lifeSpan:      lifeSpan,
+		expiresAt:     t.Add(maxAge),
+		createdOn:     t,
+		accessedOn:    t,
+		accessCount:   0,
+		aboutToExpire: nil,
+		data:          data,
+	}
+}
+
 // KeepAlive marks an item to be kept for another expireDuration period.
 func (item *CacheItem) KeepAlive() {
 	item.Lock()
@@ -65,6 +81,12 @@ func (item *CacheItem) KeepAlive() {
 func (item *CacheItem) LifeSpan() time.Duration {
 	// immutable
 	return item.lifeSpan
+}
+
+// ExpiresAt returns this item's max expiration time.
+func (item *CacheItem) ExpiresAt() time.Time {
+	// immutable
+	return item.expiresAt
 }
 
 // AccessedOn returns when this item was last accessed.
